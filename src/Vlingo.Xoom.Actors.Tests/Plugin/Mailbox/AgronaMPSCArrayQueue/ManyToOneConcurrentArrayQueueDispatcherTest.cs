@@ -93,10 +93,11 @@ namespace Vlingo.Xoom.Actors.Tests.Plugin.Mailbox.AgronaMPSCArrayQueue
                 // notify if in back off
                 mailbox.Send(localMessage);
 
-                // every third message give time for dispatcher to back off
+                // Every third message, wait for the mailbox to drain: the dispatcher is about to
+                // back off, so sending now exercises the notification that wakes it up again.
                 if (count % 3 == 0)
                 {
-                    Thread.Sleep(50);
+                    testResults.AwaitDeliveries(3);
                 }
             }
 
@@ -125,6 +126,7 @@ namespace Vlingo.Xoom.Actors.Tests.Plugin.Mailbox.AgronaMPSCArrayQueue
         private class TestResults
         {
             private readonly AccessSafely _accessSafely;
+            private readonly SemaphoreSlim _deliveries = new(0);
 
             public TestResults(int happenings)
             {
@@ -136,7 +138,20 @@ namespace Vlingo.Xoom.Actors.Tests.Plugin.Mailbox.AgronaMPSCArrayQueue
                     .ReadingWith<int, bool>("isHighest", count => count > highest.Get());
             }
 
-            public void SetHighest(int value) => _accessSafely.WriteUsing("highest", value);
+            public void SetHighest(int value)
+            {
+                _accessSafely.WriteUsing("highest", value);
+                _deliveries.Release();
+            }
+
+            /// <summary>Answer only once <paramref name="count"/> more messages have been taken.</summary>
+            public void AwaitDeliveries(int count)
+            {
+                for (var delivered = 0; delivered < count; ++delivered)
+                {
+                    _deliveries.Wait();
+                }
+            }
 
             public int GetHighest() => _accessSafely.ReadFrom<int>("highest");
 

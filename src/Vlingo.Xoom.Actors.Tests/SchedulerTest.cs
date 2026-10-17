@@ -84,6 +84,9 @@ namespace Vlingo.Xoom.Actors.Tests
             public ICompletes<int> QueryCount()
             {
                 _completesEventually = CompletesEventually();
+                // Counting starts only when the count is asked for, so that the answer is known
+                // before the first signal can arrive.
+                Schedule();
                 return (ICompletes<int>)Completes();
             }
 
@@ -95,21 +98,16 @@ namespace Vlingo.Xoom.Actors.Tests
                 }
                 else
                 {
+                    // Answering is an actor message of its own, so the actor has to stay alive until
+                    // the answer has been delivered.
                     _completesEventually.With(_count);
-
-                    SelfAs<IStoppable>().Stop();
                 }
-            }
-
-            public override void Start()
-            {
-                Schedule();
             }
 
             private void Schedule()
             {
                 ++_count;
-                Scheduler.ScheduleOnce(_scheduled, _count, TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(1));
+                Scheduler.ScheduleOnce(_scheduled, _count, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1));
             }
         }
 

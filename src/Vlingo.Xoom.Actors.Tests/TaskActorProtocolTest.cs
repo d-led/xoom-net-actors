@@ -1,12 +1,10 @@
 // Copyright © 2012-2023 VLINGO LABS. All rights reserved.
 //
-// This Source Code Form is subject to the terms of the
-// Mozilla Public License, v. 2.0. If a copy of the MPL
-// was not distributed with this file, You can obtain
-// one at https://mozilla.org/MPL/2.0/.
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 using System;
-using System.Threading;
 using System.Threading.Tasks;
 using Vlingo.Xoom.Common;
 using Xunit;
@@ -18,184 +16,169 @@ namespace Vlingo.Xoom.Actors.Tests
         [Fact]
         public async Task TestThatMailboxDoesntDeliverWhileAwaiting()
         {
-            var uc = World.ActorFor<IUsesTask>(() => new UsesTaskActor());
-            var thread = new Thread(() =>
-            {
-                Thread.Sleep(100);
-                uc.Change(10);
-            });
-            thread.Start();
-            
-            var one = await uc.GetOne();
-            Assert.Equal(1, one);
+            var call = new BlockedCall();
+            var usesTask = World.ActorFor<IUsesTask>(() => new UsesTaskActor(call));
+
+            var one = usesTask.GetOne();
+            call.AwaitEntered();
+            usesTask.Change(10);
+            call.Release();
+
+            Assert.Equal(1, await one);
         }
-        
+
         [Fact]
         public async Task TestThatExceptionIsCorrectlyHandled()
         {
-            var uc = World.ActorFor<IUsesTask>(() => new UsesFailingTaskActor());
+            var usesTask = World.ActorFor<IUsesTask>(() => new UsesFailingTaskActor());
 
-            try
-            {
-                await uc.GetOne();
-            }
-            catch (Exception e)
-            {
-                Assert.Equal("Cannot perform the operation", e.Message);
-            }
+            var thrown = await Assert.ThrowsAsync<Exception>(() => usesTask.GetOne());
+
+            Assert.Equal("Cannot perform the operation", thrown.Message);
         }
-        
+
         [Fact]
         public async Task TestThatSchedulesLongRunningOperations()
         {
-            var uc = World.ActorFor<IUsesTask>(() => new UsesLongRunningTaskActor());
-            var one = await uc.GetOne();
-            Assert.Equal(1, one);
+            var call = new BlockedCall();
+            var usesTask = World.ActorFor<IUsesTask>(() => new UsesLongRunningTaskActor(call));
+
+            var one = usesTask.GetOne();
+            call.AwaitEntered();
+            call.Release();
+
+            Assert.Equal(1, await one);
         }
-        
+
         [Fact]
         public async Task TestThatSchedulesLongRunningOperationsAndSuspendMailbox()
         {
-            var uc = World.ActorFor<IUsesTask>(() => new UsesLongRunningTaskActor());
-            var thread = new Thread(() =>
-            {
-                Thread.Sleep(100);
-                uc.Change(10);
-            });
-            thread.Start();
-            
-            var one = await uc.GetOne();
-            Assert.Equal(1, one);
+            var call = new BlockedCall();
+            var usesTask = World.ActorFor<IUsesTask>(() => new UsesLongRunningTaskActor(call));
+
+            var one = usesTask.GetOne();
+            call.AwaitEntered();
+            usesTask.Change(10);
+            call.Release();
+
+            Assert.Equal(1, await one);
         }
-        
+
         [Fact]
         public async Task TestThatTaskLikeCompletesCanBeAwaited()
         {
-            var uc = World.ActorFor<IUsesTask>(() => new UsesTaskActor());
-            var two = await uc.GetTwoAsync();
-            Assert.Equal(2, two);
+            var call = new BlockedCall();
+            var usesTask = World.ActorFor<IUsesTask>(() => new UsesTaskActor(call));
+
+            var two = usesTask.GetTwoAsync();
+            call.AwaitEntered();
+            call.Release();
+
+            Assert.Equal(2, await two);
         }
-        
+
         [Fact]
         public async Task TestThatMailboxDoesntDeliverForCompletesWhileAwaiting()
         {
-            var uc = World.ActorFor<IUsesTask>(() => new UsesTaskActor());
-            var thread = new Thread(() =>
-            {
-                Thread.Sleep(100);
-                uc.Change(10);
-            });
-            thread.Start();
-            
-            var one = await uc.GetTwoAsync();
-            Assert.Equal(2, one);
-            var eleven = await uc.GetTwoAsync();
-            Assert.Equal(11, eleven);
+            var call = new BlockedCall();
+            var usesTask = World.ActorFor<IUsesTask>(() => new UsesTaskActor(call));
+
+            var first = usesTask.GetTwoAsync();
+            call.AwaitEntered();
+            usesTask.Change(10);
+            call.Release();
+
+            Assert.Equal(2, await first);
+            Assert.Equal(11, await usesTask.GetTwoAsync());
         }
-        
+
         [Fact]
         public async Task TestThatSchedulesLongRunningOperationsForCompletesAndSuspendMailbox()
         {
-            var uc = World.ActorFor<IUsesTask>(() => new UsesLongRunningTaskActor());
-            var thread = new Thread(() =>
-            {
-                Thread.Sleep(100);
-                uc.Change(10);
-            });
-            thread.Start();
-            
-            var one = await uc.GetTwoAsync();
-            Assert.Equal(2, one);
-        }
-        
-        [Fact]
-        public async Task TestThatExceptionIsCorrectlyHandledForCompletes()
-        {
-            var uc = World.ActorFor<IUsesTask>(() => new UsesFailingTaskActor());
+            var call = new BlockedCall();
+            var usesTask = World.ActorFor<IUsesTask>(() => new UsesLongRunningTaskActor(call));
 
-            await uc.GetTwoAsync()
-                .RecoverFrom(e =>
-                {
-                    Assert.Equal("Cannot perform the operation", e.Message);
-                    return 1;
-                });
+            var two = usesTask.GetTwoAsync();
+            call.AwaitEntered();
+            usesTask.Change(10);
+            call.Release();
+
+            Assert.Equal(2, await two);
         }
+
     }
-    
+
     public class UsesTaskActor : Actor, IUsesTask
     {
+        private readonly BlockedCall _call;
         private int _one = 1;
-        
+
+        public UsesTaskActor(BlockedCall call) => _call = call;
+
         public async Task<int> GetOne()
         {
-            await Task.Delay(1000);
+            await Task.Run(() => _call.Enter());
             return _one;
         }
 
         public async ICompletes<int> GetTwoAsync()
         {
-            await Task.Delay(1000);
+            await Task.Run(() => _call.Enter());
             return await Completes().With(_one + 1);
         }
 
         public void Change(int newOne) => _one = newOne;
     }
-    
+
     public class UsesFailingTaskActor : Actor, IUsesTask
     {
-        public async Task<int> GetOne()
-        {
-            await Task.Delay(1000);
-            throw new Exception("Cannot perform the operation");
-        }
+        private const string Failure = "Cannot perform the operation";
+
+        public Task<int> GetOne() => Task.FromException<int>(new Exception(Failure));
 
         public async ICompletes<int> GetTwoAsync()
         {
-            await Task.Delay(1000);
-            throw new Exception("Cannot perform the operation");
+            await Task.Run(() => { });
+            throw new Exception(Failure);
         }
 
         public void Change(int newOne)
         {
         }
     }
-    
+
     public class UsesLongRunningTaskActor : Actor, IUsesTask
     {
+        private readonly BlockedCall _call;
         private int _one = 1;
-        
-        public Task<int> GetOne()
-        {
-            return Task<int>.Factory.StartNew(() =>
+
+        public UsesLongRunningTaskActor(BlockedCall call) => _call = call;
+
+        public Task<int> GetOne() =>
+            Task.Factory.StartNew(() =>
             {
-                Task.Delay(2000).Wait();
+                _call.Enter();
                 return _one;
             }, TaskCreationOptions.LongRunning);
-        }
 
         public async ICompletes<int> GetTwoAsync()
         {
-            await Task.Delay(100);
-            var result = await Task<int>.Factory.StartNew(() =>
+            var value = await Task.Factory.StartNew(() =>
             {
-                Task.Delay(2000).Wait();
+                _call.Enter();
                 return _one;
-            }, TaskCreationOptions.LongRunning)
-                .ContinueWith(t => t.Result + 1);
+            }, TaskCreationOptions.LongRunning);
 
-            return await Completes().With(result);
+            return await Completes().With(value + 1);
         }
 
-        public void Change(int newOne)
-        {
-            _one = newOne;
-        }
+        public void Change(int newOne) => _one = newOne;
     }
 
     public interface IUsesTask
     {
         void Change(int newOne);
-        
+
         Task<int> GetOne();
 
         ICompletes<int> GetTwoAsync();

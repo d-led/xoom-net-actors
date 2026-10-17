@@ -39,7 +39,7 @@ namespace Vlingo.Xoom.Actors.Tests
                 stoppables[idx].Stop();
             }
 
-            var stopCount = stopCountAccess.ReadFromExpecting("value", 12, 10);
+            var stopCount = stopCountAccess.ReadFromExpecting("value", 12);
             Assert.Equal(12, stopCount);
 
             World.DefaultLogger.Debug("Test: TestStopActors: stopped actors");

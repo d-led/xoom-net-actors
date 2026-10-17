@@ -1,9 +1,8 @@
 // Copyright © 2012-2023 VLINGO LABS. All rights reserved.
 //
-// This Source Code Form is subject to the terms of the
-// Mozilla Public License, v. 2.0. If a copy of the MPL
-// was not distributed with this file, You can obtain
-// one at https://mozilla.org/MPL/2.0/.
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 using System.Threading;
 using Vlingo.Xoom.Actors.Plugin.Mailbox.TestKit;
@@ -14,39 +13,57 @@ namespace Vlingo.Xoom.Actors.Tests;
 
 public class ActorProxyTest
 {
-    private static readonly AtomicReference<string> UnderTest = new("UNKNOWN");
-    private static readonly CountdownEvent Latch = new(1);
+    private readonly AtomicReference<string> _underTest = new("UNKNOWN");
+    private readonly CountdownEvent _latch = new(1);
+    private World _world;
 
-    private readonly Thread _runtimeStartWorldThread = new(() =>
+    private readonly Thread _runtimeStartWorldThread;
+
+    public ActorProxyTest()
     {
-        TestRuntimeDiscoverer.IsTestDetectionDeactivated = true;
-        var world = World.StartWithDefaults("StartForMain");
-        UnderTest.Set(world.ResolveDynamic<bool>(ActorProxy.InternalActorProxyForTestId) ? "TRUE" : "FALSE");
-        Latch.Signal();
-    });
+        // The world is started on a separate thread on purpose: the runtime discovers that it is
+        // under test from the assemblies loaded in the process, and this test wants it not to.
+        _runtimeStartWorldThread = new Thread(() =>
+        {
+            TestRuntimeDiscoverer.IsTestDetectionDeactivated = true;
+            _world = World.StartWithDefaults("StartForMain");
+            _underTest.Set(_world.ResolveDynamic<bool>(ActorProxy.InternalActorProxyForTestId) ? "TRUE" : "FALSE");
+            _latch.Signal();
+        });
+    }
 
     [Fact]
     public void TestThatActorProxyInitializesForMain()
     {
-        //Assert.False(ActorProxy.IsInitializingForTest()); // state before initializing
+        try
+        {
+            _runtimeStartWorldThread.Start();
 
-        // use a separate Thread since it will not be on this stack
-        _runtimeStartWorldThread.Start();
+            _latch.Wait();
 
-        Latch.Wait();
-
-        Assert.Equal("FALSE", UnderTest.Get());
+            Assert.Equal("FALSE", _underTest.Get());
+        }
+        finally
+        {
+            _world?.Terminate();
+            TestRuntimeDiscoverer.IsTestDetectionDeactivated = false;
+        }
     }
 
     [Fact]
     public void TestThatActorProxyInitializesForTest()
     {
-        //Assert.False(ActorProxy.IsInitializingForTest()); // state before initializing
+        try
+        {
+            TestRuntimeDiscoverer.IsTestDetectionDeactivated = false;
+            ActorProxy.InitializeForTest();
+            var world = World.StartWithDefaults("StartForTest");
 
-        TestRuntimeDiscoverer.IsTestDetectionDeactivated = false;
-        ActorProxy.InitializeForTest();
-        var world = World.StartWithDefaults("StartForTest");
-
-        Assert.True(world.ResolveDynamic<bool>(ActorProxy.InternalActorProxyForTestId));
+            Assert.True(world.ResolveDynamic<bool>(ActorProxy.InternalActorProxyForTestId));
+        }
+        finally
+        {
+            TestRuntimeDiscoverer.IsTestDetectionDeactivated = false;
+        }
     }
 }
