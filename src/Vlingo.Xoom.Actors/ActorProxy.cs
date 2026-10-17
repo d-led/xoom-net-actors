@@ -61,12 +61,19 @@ internal static class ActorProxy
     private static bool IsGeneratingForMain(World world) => 
         !world.ResolveDynamic<bool>(InternalActorProxyForTestId);
 
-    private static Type? LoadProxyClassFor(string targetClassname, Actor actor)
-        => ClassLoaderFor(actor).LoadClass(targetClassname);
+    /// <summary>
+    /// Answers the <c>Type</c> of the proxy: first from the assembly of the protocol it is created
+    /// for, and then from the <c>DynaClassLoader</c>, which only searches assemblies named
+    /// <c>Vlingo*</c>. Without the first step a proxy compiled into the application's own assembly
+    /// is never found and one is compiled at run time instead.
+    /// </summary>
+    private static Type? LoadProxyClassFor(string targetClassname, Actor actor, Type protocol)
+        => protocol.Assembly.GetType(targetClassname, throwOnError: false)
+            ?? ClassLoaderFor(actor).LoadClass(targetClassname);
 
     private static object TryCreate(Actor actor, IMailbox mailbox, Type protocol, string targetClassname)
     {
-        var proxyClass = LoadProxyClassFor(targetClassname, actor);
+        var proxyClass = LoadProxyClassFor(targetClassname, actor, protocol);
         if (proxyClass != null && proxyClass.IsGenericTypeDefinition)
         {
             var genericTypeParams = protocol.GetGenericArguments();
@@ -157,11 +164,14 @@ internal static class ActorProxy
 
     private static DynaClassLoader ClassLoaderFor(Actor actor)
     {
-        var classLoader = actor.LifeCycle.Environment.Stage.World.ClassLoader;
+        // The stage and the world are read through the environment on purpose: a secured actor
+        // cannot provide its stage, and creating a proxy must not depend on that.
+        var world = actor.LifeCycle.Environment.Stage.World;
+        var classLoader = world.ClassLoader;
         if (classLoader == null)
         {
             classLoader = new DynaClassLoader();
-            actor.Stage.World.ClassLoader = classLoader;
+            world.ClassLoader = classLoader;
         }
 
         return classLoader;
